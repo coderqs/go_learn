@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"io"
 )
 
 type Server struct {
@@ -30,7 +31,7 @@ func NewServer(ip string, port int) *Server {
 func (this *Server) ListenMessager() {
 	for {
 		msg := <-this.Message
-
+		fmt.Println("recv message: ", msg)
 		this.mapLock.Lock()
 		for _, cli := range this.OnlineMap {
 			cli.C <- msg
@@ -41,19 +42,42 @@ func (this *Server) ListenMessager() {
 
 func (this *Server) BroadCast(user *User, msg string) {
 	sendMsg := "[" + user.Addr + "] " + user.Name + ": " + msg
+	fmt.Println("BroadCast sendMsg: ", sendMsg)
 	this.Message <- sendMsg
 }
 
 func (this *Server) Handler(conn net.Conn) {
 	fmt.Println("链接建立成功")
 
-	user := NewUser(conn)
+	user := NewUser(conn, this)
+	user.Online()
+	//this.mapLock.Lock()
+	//this.OnlineMap[user.Name] = user
+	//this.mapLock.Unlock()
+	//
+	//this.BroadCast(user, "已上线")
 
-	this.mapLock.Lock()
-	this.OnlineMap[user.Name] = user
-	this.mapLock.Unlock()
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := conn.Read(buf)
+			if n==0 {
+				//this.BroadCast(user, "下线")
+				user.Offline()
+				return
+			}
 
-	this.BroadCast(user, "已上线")
+			if err != nil && err != io.EOF {
+				fmt.Println("Conn Read err: ", err)
+				return 
+			}
+
+			msg := string(buf[:n-1])
+
+			//this.BroadCast(user, msg)
+			user.DoMessage(msg)
+		}
+	}()
 
 	select {}
 }
